@@ -39,7 +39,7 @@ export async function runPipeline(url:string,emit:Emit) {
   progress("triage",`Jev saw: ${PAGE_TYPES[pageType as keyof typeof PAGE_TYPES]} (${Math.round((triage.page.confidence||0)*100)}% confidence).`);
   progress("extract","Extracting names, bios and observed links with OpenAI…");
   const max=Math.max(1,Math.min(60,Number(process.env.MAX_CREATORS)||60));
-  const extracted=(await extract(source,pageType,max)).map(c=>ground(c,source)).filter(c=>c.name||c.primary_handle);
+  const extracted=(await extract(source,pageType,max)).map(c=>ground(c,source)).map(c=>pageType==="roster"&&c.source_profile_url===source.url?{...c,source_profile_url:""}:c).filter(c=>c.name||c.primary_handle);
   if(!extracted.length)throw new Error("No creators could be extracted from the visible evidence. Try a direct roster or creator URL.");
   progress("extract",`Extracted ${extracted.length} creator${extracted.length===1?"":"s"}${extracted.length===max?` (run cap: ${max})`:""}.`);
   const excluded=new Set(source.anchors.filter(a=>a.sitewide).map(a=>parseSocial(a.href)?.href).filter((s):s is string=>!!s));
