@@ -1,0 +1,10 @@
+export const socialPlatforms = ["instagram", "tiktok", "youtube", "x", "twitch", "threads", "snapchat", "pinterest", "linkedin", "facebook", "substack", "podcast", "kick", "website", "link_in_bio"] as const;
+export type Platform = typeof socialPlatforms[number];
+export type Anchor = { href: string; text: string; context: string; sitewide?: boolean };
+export type Candidate = Anchor & { platform: Platform | "email"; handle: string };
+export type ExtractedCreator = { name: string; primary_handle: string; bio: string; categories: string; location: string; email: string; management_contact: string; source_profile_url: string; urls: string[]; avatar_url: string };
+export const columns = ["name", "primary_handle", "niche", "niche_confidence", "bio", "location", "email", "management_contact", "instagram", "tiktok", "youtube", "x", "twitch", "threads", "snapchat", "pinterest", "linkedin", "facebook", "substack", "podcast", "website", "link_in_bio", "other_links", "avatar_url", "source_profile_url", "brand_safety_score", "needs_review", "review_reasons", "source_url", "instagram_followers", "tiktok_followers", "youtube_followers"] as const;
+export type Column = typeof columns[number];
+export type RosterRow = Record<Column, string> & { probabilities?: Record<string, Record<string, number>>; visual_assessment?: string };
+export type ProgressEvent = { type: "progress" | "screenshot" | "result" | "error"; message?: string; step?: string; screenshots?: string[]; rows?: RosterRow[]; elapsed?: number };
+export const taxonomy = ["beauty", "fashion", "fitness", "food", "travel", "gaming", "tech", "parenting/family", "lifestyle", "comedy/entertainment", "music", "finance", "education", "sports", "home/DIY", "pets", "other"];
