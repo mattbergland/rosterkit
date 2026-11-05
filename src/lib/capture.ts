@@ -1,5 +1,4 @@
 import Browserbase from "@browserbasehq/sdk";
-import { chromium } from "playwright-core";
 import { load } from "cheerio";
 import sharp from "sharp";
 import { publicFetch, publicUrl } from "./network";
@@ -25,6 +24,7 @@ async function projectId(bb:Browserbase) {
 }
 async function browserCapture(url:string):Promise<Capture> {
   await publicUrl(url);
+  const { chromium } = await import("playwright-core");
   const bb=new Browserbase({apiKey:process.env.BROWSERBASE_API_KEY});
   const id=await projectId(bb);
   const session=await bb.sessions.create({projectId:id,api_timeout:90});
