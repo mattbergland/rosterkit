@@ -1,0 +1,45 @@
+{
+  "props": {
+    "pageProps": {
+      "data": {
+        "roster": {
+          "json": {
+            "name": "Evolved Talent",
+            "creators": [
+              {
+                "name": "MrRoflWaffles",
+                "username": "mrroflwaffles",
+                "city": null,
+                "state": null,
+                "country": null,
+                "profilePictureUrl": "https://d1y51w3tnalv5b.cloudfront.net/f9/90/f990bc21-1e4f-444c-9ba7-100d0fa6e05f",
+                "tags": ["Call of Duty", "Variety Gaming"],
+                "industries": ["Beauty", "Fashion", "Fitness", "Travel", "Food"],
+                "platforms": [
+                  {"size":284870,"engagementRate":5.391742752970799,"platform":"tiktok","platformUrl":"https://vm.tiktok.com/ZN851SKc8/"},
+                  {"size":80430,"engagementRate":0.2376600770856645,"platform":"facebook","platformUrl":"https://www.facebook.com/176623442384770"},
+                  {"size":2410000,"engagementRate":0,"platform":"youtube","platformUrl":"https://www.youtube.com/channel/UCzH3H8sRfqH3rEVZcpTV2Cw"},
+                  {"size":129885,"engagementRate":6.906556100936277,"platform":"instagram","platformUrl":"https://www.instagram.com/milo_bc"},
+                  {"size":177217,"engagementRate":5010,"platform":"twitch","platformUrl":"https://www.twitch.tv/mrroflwaffles"},
+                  {"size":294000,"platform":"X","platformUrl":"https://x.com/MrRoflWaffles?ref_src=twsrc%5Egoogle"}
+                ]
+              },
+              {
+                "name":"Thiefs",
+                "username":"thiefs",
+                "tags":["Fortnite","Family Friendly"],
+                "platforms":[
+                  {"size":176000,"engagementRate":0,"platform":"youtube","platformUrl":"https://www.youtube.com/channel/UCn1mIzxLg4HhBvmzvrpRkbA"},
+                  {"size":278956,"engagementRate":3.749443044662889,"platform":"tiktok","platformUrl":"https://vm.tiktok.com/ZPL7943MM/"},
+                  {"size":346507,"engagementRate":0.058,"platform":"instagram","platformUrl":"https://www.instagram.com/thiefs"},
+                  {"size":627340,"engagementRate":1310,"platform":"twitch","platformUrl":"https://www.twitch.tv/thiefs"},
+                  {"size":261800,"platform":"X","platformUrl":"https://x.com/Thiefs"}
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

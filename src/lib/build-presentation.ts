@@ -5,19 +5,25 @@ export const buildStages = [
   "Finding creators",
   "Gathering their channels",
   "Polishing your roster",
+  "Checking audience size",
 ] as const;
 
-export type BuildProgress = { stage: number; foundCount: number | null };
+export type BuildProgress = { stage: number; foundCount: number | null; sources?: string[]; creatorLimit?: number; incomplete?: boolean; searching?: boolean };
 export const initialProgress: BuildProgress = { stage: 0, foundCount: null };
 
 export function updateBuildProgress(previous: BuildProgress, event: ProgressEvent): BuildProgress {
   if (event.type !== "progress") return previous;
-  const stageByStep: Record<string, number> = { fetch: 0, triage: 0, extract: 1, enrich: 2, verify: 3 };
+  const stageByStep: Record<string, number> = { discover:0, fetch: 0, triage: 0, extract: 1, enrich: 2, verify: 3, audience:4 };
   const stage = stageByStep[event.step || ""];
   const count = event.step === "extract" ? event.message?.match(/^Extracted (\d+) creators?\b/) : null;
   return {
+    ...previous,
     stage: Math.max(previous.stage, stage ?? previous.stage),
     foundCount: count ? Number(count[1]) : previous.foundCount,
+    ...(event.sources?{sources:event.sources}:{}),
+    ...(event.creatorLimit?{creatorLimit:event.creatorLimit}:{}),
+    ...(event.incomplete?{incomplete:true}:{}),
+    ...(event.step==="discover"?{searching:true}:event.step==="fetch"&&previous.searching?{searching:false}:{}),
   };
 }
 

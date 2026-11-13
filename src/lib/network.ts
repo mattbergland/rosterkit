@@ -14,11 +14,11 @@ export async function publicUrl(value: string): Promise<URL> {
   if (!addresses.length || addresses.some(a => privateIP(a.address))) throw new Error("Private and local network URLs are not allowed.");
   return u;
 }
-export async function publicFetch(value: string, maxBytes = 3_000_000): Promise<{bytes: Buffer; url: string; contentType: string}> {
+export async function publicFetch(value: string, maxBytes = 3_000_000, signal?: AbortSignal): Promise<{bytes: Buffer; url: string; contentType: string}> {
   let url = value;
   for (let i=0;i<6;i++) {
     await publicUrl(url);
-    const response = await fetch(url, {redirect:"manual", signal:AbortSignal.timeout(15000), headers:{"User-Agent":"Rosterkit/1.0 (public creator roster research)", Accept:"text/html,image/*"}});
+    const response = await fetch(url, {redirect:"manual", signal:signal?AbortSignal.any([signal,AbortSignal.timeout(15000)]):AbortSignal.timeout(15000), headers:{"User-Agent":"Rosterkit/1.0 (public creator roster research)", Accept:"text/html,image/*"}});
     if ([301,302,303,307,308].includes(response.status)) { const next = response.headers.get("location"); if (!next) throw new Error("Redirect without location"); url = new URL(next,url).href; continue; }
     if (!response.ok) throw new Error(`Page returned HTTP ${response.status}. It may block automated access.`);
     const reader = response.body?.getReader();

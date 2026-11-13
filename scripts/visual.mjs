@@ -2,12 +2,13 @@ import { chromium, expect } from "@playwright/test";
 import fs from "node:fs/promises";
 const base=process.argv[2]||"http://localhost:3000";
 const prefix=process.argv[3]||"rosterkit-progress";
+const source=process.argv[4]||"https://www.outloudtalent.com";
 const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH||`${process.env.HOME}/.cache/ms-playwright/chromium-1248/chrome-linux64/chrome`,args:["--no-sandbox"]});
 const page=await browser.newPage({viewport:{width:1280,height:900}});
 const errors=[];page.on("pageerror",e=>errors.push(e.message));
 await fs.mkdir(`${process.env.HOME}/screens`,{recursive:true});
 await page.goto(base);
-await page.getByLabel("Source URL").fill("https://www.outloudtalent.com");
+await page.getByLabel("Source URL").fill(source);
 await page.getByRole("button",{name:"Build roster",exact:true}).click();
 await expect(page.getByRole("button",{name:"Building…",exact:true})).toBeDisabled();
 await expect(page.locator(".skeleton-table tbody tr")).toHaveCount(6);
@@ -17,7 +18,7 @@ await expect(page.locator(".friendly-stages li.active")).toHaveCount(1);
 await expect(page.locator(".build-track.is-running")).toBeVisible();
 await expect(page.locator(".results-panel")).toHaveAttribute("aria-busy","true");
 async function assertPlainCopy(){
-  const copy=await page.locator("main").innerText();
+  const copy=await page.locator("main").evaluate(main=>{const copy=main.cloneNode(true);copy.querySelectorAll("tbody,.audience-dialog").forEach(node=>node.remove());return copy.textContent;});
   if(/Jev|OpenAI|Browserbase|screenshot tiles|visual_assessment|visual triage|enriching \d|verify accounts|\d+% confidence/i.test(copy))throw new Error("Technical details leaked into the UI");
 }
 async function capture(state){
@@ -45,13 +46,22 @@ if(await page.locator('.error-panel[role=alert]').count())throw new Error(await 
 const rowCount=await page.locator("tbody tr").count();
 console.log(`UI BUILD: ${rowCount} rows; page errors: ${errors.length}`);
 await expect(page.locator(".skeleton-table")).toHaveCount(0);
-await expect(page.locator(".friendly-stages .done")).toHaveCount(4);
+await expect(page.locator(".friendly-stages .done")).toHaveCount(5);
 await expect(page.getByRole("progressbar")).toHaveAttribute("aria-valuenow","100");
 await expect(page.getByText("Your roster is ready.",{exact:true})).toBeVisible();
 await page.locator(".build-fill").evaluate(async el=>{await Promise.all(el.getAnimations().map(animation=>animation.finished));});
 await capture("complete");
-console.log("COMPLETED: four checkmarks; full progress bar; real creator rows; enabled downloads; no technical copy; no page overflow");
-const name=page.locator("tbody tr").first().locator("td").nth(1).getByRole("button");
+console.log("COMPLETED: five checkmarks; full progress bar; real creator rows; enabled downloads; no technical copy; no page overflow");
+console.log(`AUDIENCE UI: ${await page.locator(".audience-count").count()} compact channel counts; ${await page.locator(".roster-sources").innerText()}`);
+await page.getByRole("button",{name:/View audience details for/}).first().click();
+await expect(page.getByRole("dialog")).toBeVisible();
+for(const [size,width,height] of [["desktop",1280,900],["mobile",390,844]]){
+  await page.setViewportSize({width,height});
+  await page.screenshot({path:`${process.env.HOME}/screens/${prefix}-audience-details-${size}-${width}x${height}.png`});
+}
+await page.getByRole("button",{name:"Close audience details",exact:true}).click();
+console.log("AUDIENCE DETAILS: opens, renders channel figures and closes on desktop/mobile");
+const name=page.locator("tbody tr").first().locator("td").nth(1).locator(".cell-value");
 const original=await name.innerText();await name.click();const editor=page.locator(".cell-editor");await editor.fill(original+" (edited)");await editor.press("Enter");
 if(!await page.getByRole("button",{name:original+" (edited)",exact:true}).isVisible())throw new Error("Inline edit did not persist");
 await page.getByRole("button",{name:original+" (edited)",exact:true}).click();await page.locator(".cell-editor").fill(original);await page.locator(".cell-editor").press("Enter");

@@ -4,12 +4,12 @@ import { buildStages, friendlyBuildError, initialProgress, updateBuildProgress }
 describe("friendly build progress", () => {
   it("maps internal steps to a small set of plain stages without exposing messages", () => {
     let progress = initialProgress;
-    for (const [step, expected] of [["fetch", 0], ["triage", 0], ["extract", 1], ["enrich", 2], ["verify", 3]] as const) {
+    for (const [step, expected] of [["fetch", 0], ["triage", 0], ["extract", 1], ["enrich", 2], ["verify", 3],["audience",4]] as const) {
       progress = updateBuildProgress(progress, { type: "progress", step, message: "Jev / OpenAI / Browserbase 93%" });
       expect(progress.stage).toBe(expected);
       expect(JSON.stringify(progress)).not.toMatch(/Jev|OpenAI|Browserbase|93%/);
     }
-    expect(buildStages).toHaveLength(4);
+    expect(buildStages).toHaveLength(5);
   });
   it("keeps stages moving forward when parallel workers report earlier steps", () => {
     expect(updateBuildProgress({ stage: 3, foundCount: 12 }, { type: "progress", step: "enrich", message: "Enriching 3/12: Name" })).toEqual({ stage: 3, foundCount: 12 });
@@ -21,6 +21,10 @@ describe("friendly build progress", () => {
     for (const event of [{ type: "progress" }, { type: "progress", step: "unknown", message: "12%" }, { type: "screenshot" }, { type: "error", message: "Jev request failed (HTTP 401)." }] as const) {
       expect(updateBuildProgress(initialProgress, event)).toEqual(initialProgress);
     }
+  });
+  it("preserves friendly limits, discovered pages and incomplete-run notes",()=>{
+    const progress=updateBuildProgress(initialProgress,{type:"progress",step:"audience",sources:["https://agency.com/roster"],creatorLimit:60,incomplete:true});
+    expect(progress).toMatchObject({stage:4,sources:["https://agency.com/roster"],creatorLimit:60,incomplete:true});
   });
 });
 

@@ -3,6 +3,14 @@ import { extract } from "./extract";
 import { avatarImage, jev, type Question } from "./jev";
 import { parseCandidates, parseSocial } from "./social";
 import { columns, taxonomy, type Anchor, type ExtractedCreator, type ProgressEvent, type RosterRow } from "./types";
+import { applyAudienceMetrics, attributeSiteMetrics, type AudienceMetrics } from "./audience";
+import { audienceEvidence } from "./audience-evidence";
+import { fillPublicAudience } from "./audience-profiles";
+import { discoverRoster, parseStructuredRoster } from "./adapters";
+import { structuredRows } from "./adapters/pipeline";
+import { discoverAgencyRosters } from "./roster-discovery";
+import { mergeRosterRows } from "./roster-merge";
+import { isThreadKit } from "./adapters/thread";
 
 export const REVIEW_CONFIDENCE = 0.75;
 const PAGE_TYPES = {roster:"Roster grid of multiple creators",creator:"Single creator profile or personal site",bio:"Link-in-bio page",social:"Social platform profile",unrelated:"Not creator-related, blocked page, login wall or error"};
@@ -23,10 +31,44 @@ async function pooled<T,R>(items:T[],limit:number,fn:(item:T,index:number)=>Prom
   return result;
 }
 export async function runPipeline(url:string,emit:Emit) {
-  const started=Date.now();const deadline=started+265000;
+  const started=Date.now();
+  emit({type:"progress",step:"discover",message:"Looking for the roster…"});
+  const discovered=await discoverRoster(url);
+  const homepage=new URL(url).pathname==="/"&&parseSocial(url)?.platform==="website";
+  let searched=homepage&&!discovered.roster;
+  const found=searched?await discoverAgencyRosters(url):[];
+  const candidates=found.length?found.map(candidate=>({url:candidate.url,roster:candidate.roster,sourceUrl:candidate.sourceUrl,embeddedUrl:undefined as string|undefined})):[{url,roster:discovered.roster,sourceUrl:undefined as string|undefined,embeddedUrl:discovered.embeddedUrl}];
+  const all:RosterRow[]=[];const sources:string[]=[];let expensiveRemaining=Math.max(1,Math.min(60,Number(process.env.MAX_CREATORS)||60));let lastError:unknown;
+  for(let index=0;index<candidates.length;index++){
+    const candidate=candidates[index];
+    if(Date.now()>started+225000||!candidate.roster&&expensiveRemaining<=0){emit({type:"progress",step:"audience",incomplete:true});continue;}
+    try{
+      const rows=candidate.roster?await structuredRows(candidate.roster,candidate.url,emit):await runPagePipeline(candidate.embeddedUrl||candidate.url,emit,started,expensiveRemaining);
+      if(!candidate.roster)expensiveRemaining-=rows.length;
+      all.push(...rows);sources.push(...[candidate.sourceUrl,candidate.url].filter((url):url is string=>Boolean(url)));
+    }catch(error){
+      lastError=error;
+      if(!searched&&error instanceof Error&&/No accessible creator|No creators could be extracted/.test(error.message)){
+        searched=true;emit({type:"progress",step:"discover",message:"Looking for the roster…"});
+        const alternatives=await discoverAgencyRosters(url);
+        candidates.push(...alternatives.filter(alternative=>!candidates.some(candidate=>candidate.url===alternative.url)).map(candidate=>({url:candidate.url,roster:candidate.roster,sourceUrl:candidate.sourceUrl,embeddedUrl:undefined})));
+      }
+    }
+  }
+  if(!all.length)throw lastError||new Error("No creators could be extracted from this roster.");
+  const rows=mergeRosterRows(all);
+  emit({type:"progress",step:"audience",message:"Checking audience size…",sources:[...new Set(sources)]});
+  await fillPublicAudience(rows,started+275000);
+  emit({type:"result",rows,elapsed:Math.round((Date.now()-started)/1000)});
+}
+
+async function runPagePipeline(url:string,emit:Emit,started:number,max:number):Promise<RosterRow[]> {
+  const deadline=started+230000;
   const progress=(step:string,message:string)=>emit({type:"progress",step,message});
   progress("fetch","Fetching and rendering the source page…");
   const source=await capture(url,true);
+  const adapted=parseStructuredRoster(source);
+  if(adapted)return structuredRows(adapted,url,emit);
   if(source.warning)progress("fetch",source.warning);
   if(source.screenshots.length)emit({type:"screenshot",screenshots:source.screenshots.map(s=>`data:image/jpeg;base64,${s}`)});
   progress("triage",source.screenshots.length?"Jev is checking the screenshot tiles…":"No screenshot available. Jev is checking text evidence instead (visual triage skipped).");
@@ -38,35 +80,42 @@ export async function runPipeline(url:string,emit:Emit) {
   if(pageType==="unrelated" || (triage.present.noul??0)<0.5)throw new Error("No accessible creator content was found. This may be a blocked page or login wall. Try a public creator profile or the agency’s direct roster URL.");
   progress("triage",`Jev saw: ${PAGE_TYPES[pageType as keyof typeof PAGE_TYPES]} (${Math.round((triage.page.confidence||0)*100)}% confidence).`);
   progress("extract","Extracting names, bios and observed links with OpenAI…");
-  const max=Math.max(1,Math.min(60,Number(process.env.MAX_CREATORS)||60));
   const extracted=(await extract(source,pageType,max)).map(c=>ground(c,source)).map(c=>pageType==="roster"&&c.source_profile_url===source.url?{...c,source_profile_url:""}:c).filter(c=>c.name||c.primary_handle);
   if(!extracted.length)throw new Error("No creators could be extracted from the visible evidence. Try a direct roster or creator URL.");
   progress("extract",`Extracted ${extracted.length} creator${extracted.length===1?"":"s"}${extracted.length===max?` (run cap: ${max})`:""}.`);
+  if(extracted.length===max)emit({type:"progress",step:"extract",creatorLimit:max});
   const excluded=new Set(source.anchors.filter(a=>a.sitewide).map(a=>parseSocial(a.href)?.href).filter((s):s is string=>!!s));
+  const sourceMetricEvidence=[source.text,...audienceEvidence(source)];
   let completed=0;
   const rows=await pooled(extracted,5,async(original,index)=>{
     let creator=original;const reasons:string[]=[];const anchors:Anchor[]=[];
+    const audience:AudienceMetrics=attributeSiteMetrics(original.audience_metrics||[],sourceMetricEvidence,original,pageType!=="roster");
     const creatorUrls=creator.urls.map(href=>{const matching=source.anchors.find(a=>a.href===href);return matching||{href,text:creator.name,context:creator.bio};});
     anchors.push(...creatorUrls);
-    const targets=[...new Set([creator.source_profile_url,...creator.urls.filter(u=>parseSocial(u)?.platform==="link_in_bio")].filter(u=>u && u!==source.url))];
+    const targets=[...new Set([creator.source_profile_url,...creator.urls.filter(u=>parseSocial(u)?.platform==="link_in_bio"||isThreadKit(u))].filter(u=>u && u!==source.url))];
+    let adapterExtra:Partial<RosterRow>={};let adapterEngagement:Record<string,number>={};
     progress("enrich",`Enriching ${index+1}/${extracted.length}: ${creator.name||creator.primary_handle}…`);
     for(let targetIndex=0;targetIndex<Math.min(2,targets.length);targetIndex++) {
       const target=targets[targetIndex];
       if(Date.now()>deadline-55000){reasons.push("Run time budget reached; enrichment incomplete");break;}
       try {
-        const detail=await capture(target);
+        const detail=await capture(target,isThreadKit(target));
+        const adaptedDetail=parseStructuredRoster(detail)?.creators[0];
+        if(adaptedDetail&&(!adaptedDetail.creator.primary_handle||!creator.primary_handle||adaptedDetail.creator.primary_handle.toLowerCase()===creator.primary_handle.replace(/^@/,"").toLowerCase()||adaptedDetail.creator.name.toLowerCase()===creator.name.toLowerCase())){
+          Object.assign(audience,adaptedDetail.audience);adapterExtra={...adapterExtra,...adaptedDetail.extra};adapterEngagement={...adapterEngagement,...adaptedDetail.engagement};creator=merge(creator,adaptedDetail.creator);anchors.push(...adaptedDetail.creator.urls.map(href=>({href,text:creator.name,context:creator.bio})));continue;
+        }
         if(detail.warning)reasons.push(detail.warning);
         const creatorOwned=parseSocial(target)?.platform==="link_in_bio" || new URL(target).hostname!==new URL(source.url).hostname;
         anchors.push(...detail.anchors.filter(a=>creatorOwned||!a.sitewide).map(a=>({...a,sitewide:false})));
         const enriched=(await extract(detail,"single creator detail",1,creator))[0];
-        if(enriched)creator=merge(creator,ground(enriched,detail));
+        if(enriched){Object.assign(audience,attributeSiteMetrics(enriched.audience_metrics||[],[detail.text,...audienceEvidence(detail)],creator,true));creator=merge(creator,ground(enriched,detail));}
         for(const candidate of detail.anchors){if(!candidate.sitewide&&parseSocial(candidate.href)?.platform==="link_in_bio"&&!targets.includes(candidate.href)&&candidate.href!==source.url)targets.push(candidate.href);}
       }catch(e){reasons.push(`Enrichment unavailable: ${e instanceof Error?e.message:"fetch failed"}`);}
     }
     if(pageType!=="roster")anchors.push({href:source.url,text:creator.name,context:`This is the creator’s own source page: ${creator.name} ${creator.primary_handle}`},...source.anchors.map(a=>({...a,sitewide:false})));
     const candidates=parseCandidates(anchors,source.url,pageType==="roster"?excluded:new Set(),pageType==="roster");
     const row=Object.fromEntries(columns.map(c=>[c,""])) as unknown as RosterRow;
-    Object.assign(row,{name:creator.name,primary_handle:creator.primary_handle,bio:creator.bio,location:creator.location,email:creator.email,management_contact:creator.management_contact,avatar_url:creator.avatar_url,source_profile_url:creator.source_profile_url,source_url:source.url});
+    Object.assign(row,{name:creator.name,primary_handle:creator.primary_handle,bio:creator.bio,location:creator.location,email:creator.email,management_contact:creator.management_contact,avatar_url:creator.avatar_url,source_profile_url:creator.source_profile_url,source_url:url});
     if(!source.screenshots.length)reasons.push("Source visual triage unavailable");
     if((triage.page.confidence??0)<REVIEW_CONFIDENCE)reasons.push("Low-confidence page classification");
     const groups=Object.groupBy(candidates,c=>c.platform);
@@ -93,9 +142,12 @@ export async function runPipeline(url:string,emit:Emit) {
       }
       if(!creator.bio)reasons.push("Bio missing; brand-safety assessment has insufficient evidence");
     }catch(e){reasons.push(e instanceof Error?e.message:"Verification unavailable");}
+    applyAudienceMetrics(row,audience);
+    Object.assign(row,adapterExtra);
+    for(const [platform,rate] of Object.entries(adapterEngagement))Object.assign(row,{[`${platform}_engagement_rate`]:String(rate)});
     row.needs_review=reasons.length?"true":"false";row.review_reasons=reasons.join("; ");
     completed++;progress("verify",`Verified ${completed}/${extracted.length} creators.`);
     return row;
   });
-  emit({type:"result",rows,elapsed:Math.round((Date.now()-started)/1000)});
+  return rows;
 }
