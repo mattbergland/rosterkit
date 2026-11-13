@@ -10,17 +10,17 @@ npm install
 npm run dev
 ```
 
-`OPENAI_MODEL` defaults to `gpt-5`. `MAX_CREATORS` defaults to 60 and cannot exceed 60. `BROWSERBASE_PROJECT_ID` is optional: the server discovers the first project accessible to the API key. If none exists, screenshot capture falls back to plain fetch. Never commit credentials. The API keys are only used in server modules.
+`OPENAI_MODEL` defaults to `gpt-5`. `MAX_CREATORS` defaults to 60 and cannot exceed 60. `BROWSERBASE_PROJECT_ID` is optional: the server discovers the first project accessible to the API key. Browserbase is optional; unavailable or unconfigured Browserbase falls back to self-hosted Chromium, then plain fetch. Never commit credentials. The API keys are only used in server modules.
 
 ## Pipeline
 
 `POST /api/build` accepts `{ "url": "https://…" }`, returns newline-delimited JSON events (`progress`, `screenshot`, `result`, `error`), and has a 300-second deployment limit.
 
-1. Browserbase + Playwright render, scroll, collect text/anchors/images/HTML and capture a full-page JPEG. Tall screenshots are split into at most three viewport-height tiles (top, middle, bottom). Plain fetch is the fallback.
+1. Rendering tries Browserbase, then self-hosted Chromium, then plain fetch. Both browsers share the same public-network checks, scroll, HTML/text/anchor/image collection and full-page JPEG capture. Tall screenshots are split into at most three viewport-height tiles (top, middle, bottom). Renderer selection and failures are logged server-side only. The Thread kits wait for their asynchronously loaded audience labels before capture.
 2. Jev (`jev-latest`) batches page-type Choice and creator-presence Noul questions. Images use the required experimental-image opt-in header. If screenshots are unavailable, the log explicitly reports text-only triage.
 3. OpenAI structured outputs extract creators. URL and literal-field grounding remove values not observed in the source evidence. Instructions in source pages are untrusted data.
 4. Pure URL parsing normalizes platform accounts and rejects share links and service utility pages. Agency header/footer accounts are excluded.
-5. Up to five workers fetch creator details/link-in-bio pages, using Browserbase only for empty/JS-rendered pages. Page and request sizes are bounded. Run-budget exhaustion retains rows and marks them for review.
+5. Up to five workers fetch creator details/link-in-bio pages, requesting a browser only for empty/JS-rendered pages or known rendered kits. Static enrichment still uses cheap plain fetch first. Page and request sizes are bounded. Run-budget exhaustion retains rows and marks them for review.
 6. One Jev request per creator batches account Choices (including `none`), a fixed-taxonomy niche Choice, bio-professionalism Score (0–4), and optional avatar visual Choice. Candidate URLs come only from observed links. JSON includes distributions and avatar assessments. Code uses a 0.75 confidence threshold, not model arithmetic.
 7. Audience metrics are extracted from source cards and creator details first. The extraction model proposes literal counts and evidence; code validates creator/platform attribution and parses K/M/B counts. Missing YouTube, TikTok, Twitch, Instagram, X and Threads counts get a best-effort public HTML/JSON fallback: five concurrent requests, seven seconds per profile, at most 120 requests and 35 seconds total. Blocked, private, hidden and ambiguous counts stay blank. No login or private API is used.
 8. July rosters, including iframe embeds, are parsed from public structured data without per-creator extraction calls. All structured rows are retained. Up to eight public July media kits add details, and one bounded Jev batch classifies tags (not July’s generic industry defaults). Implausible engagement percentages are blank and flagged. The adapter registry also recognizes conservative embedded `creators` arrays with explicit platform follower/subscriber fields.
@@ -51,3 +51,7 @@ Public network URLs are checked, redirect targets are revalidated, response size
 ## Deployment
 
 Deploy to Vercel with the variables in `.env.example` configured as encrypted production/preview environment variables. GitHub `main` is connected for automatic deployments. `DESIGN.md` is the source design reference.
+
+The API uses Next.js's default Node runtime (an explicit runtime export is incompatible with Cache Components). Playwright Core is pinned to 1.63.0 (Chromium 153), matching `@sparticuz/chromium` 153.0.0. Both packages are server externals; output tracing includes Playwright runtime assets and Chromium's compressed binaries. Chromium unpacks into ephemeral `/tmp`, not a remote download. Node 22.17+ or 24+ is required; the production project uses Node 26. Vercel's default 2048 MB function memory exceeds the browser package's recommended 1600 MB; no larger/paid memory override is required. Self-hosted captures are serialized within each instance and browsers are closed on success or error to bound memory. Vercel's 250 MB function-package limit includes the compressed binary assets (about 67 MB), not the runtime-unpacked browser. No browser is shared between requests.
+
+Locally the renderer uses `CHROME_PATH`, Playwright's expected installed browser, or an existing Chromium under `~/.cache/ms-playwright` (or `PLAYWRIGHT_BROWSERS_PATH`). Run `npx playwright install chromium` if none is installed. Production never connects to a development CDP endpoint.
